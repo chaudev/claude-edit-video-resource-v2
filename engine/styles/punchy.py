@@ -91,23 +91,23 @@ def fit(fn, text, size, maxw=SAFE[2] - SAFE[0] - 30):
     while f.getlength(text) > maxw and size > 20: size -= 4; f = fn(size)
     return f
 def track(s): return '   '.join(' '.join(w) for w in s.split(' '))
-def kicker(img, text, y, t, at, col=GOLD):
+def kicker(img, text, y, t, at, col=GOLD, size=40):
     p = prog(t, at, .35)
     if p <= 0: return
-    f = fit(lambda s: sans(s, 'ExtraBold'), text.upper(), 40, 860)
-    chip(img, text.upper(), f, 540, y, CREAM, RED, eo(p), scale=back(p), padx=26, pady=14, radius=10)
+    f = fit(lambda s: sans(s, 'ExtraBold'), text.upper(), size, 860)
+    chip(img, text.upper(), f, 540, y, CREAM, RED, eo(p), scale=back(p), padx=int(26 * size / 40), pady=int(14 * size / 40), radius=int(10 * size / 40))
 def rule(img, y, t, at, w=220, col=GOLD):
     return
 def line(img, text, y, t, at, size=96, col=CREAM, fn=serif):
-    """every line sits on its own pill: yellow = highlight, white = normal"""
+    """plain bold text (no pill): yellow = highlight, white = normal; readability comes from glow + dimmed bg"""
     p = prog(t, at, .4)
     if p <= 0: return
     f = fit(fn, text, size, 720)
-    chip(img, text, f, 540, y, INK, GOLD if col == GOLD else CREAM, eo(p), scale=back(p), padx=30, pady=16, radius=14)
+    tx(img, text, f, 540, y, GOLD if col == GOLD else CREAM, eo(p), scale=back(p))
 def subchip(img, text, y, t, at):
     k = eo(prog(t, at, .4))
     if k <= 0: return
-    chip(img, text, fit(serifi, text, 46, 780), 540, y, CREAM, INK, k, scale=.9 + .1 * k, padx=24, pady=12, radius=10)
+    tx(img, text, fit(serifi, text, 50, 780), 540, y, CREAM, k, scale=.9 + .1 * k)
 
 # ---------- scene renderers ----------
 def scene_fn(sp, nxt):
@@ -149,7 +149,7 @@ def scene_fn(sp, nxt):
         if sp.get('l'):
             for j, s in enumerate(sp['l']): line(img, s, Y + 360 + j * 96, t, at[1] + .5 + .2 * j, 76, TEAL if j == 0 else CREAM, serifi)
     def P(img, t, _):
-        if sp.get('k'): kicker(img, sp['k'], Y - 200, t, t0 + .05)
+        if sp.get('k'): kicker(img, sp['k'], Y - 200 - (sp.get('ksize', 40) - 40) * .9, t, t0 + .05, size=sp.get('ksize', 40))
         for j, (s, at) in enumerate(sp['p']):
             col = GOLD if j in sp.get('hi', ()) else CREAM
             f = fit(an if sp.get('font') != 'serif' else serif, s, sp.get('size', 160))
@@ -194,9 +194,15 @@ def make(voice, specs, dur, ftdir, shakes=(), sfx_extra=(), style=None, seed=7):
     scenes = [(sp['t'], scene_fn(sp, None)) for sp in specs]
     starts = [sp['t'] for sp in specs]
     def bgfn(t, si):
+        k = eo(prog(t, starts[si] + .05, .3))          # text is on screen -> dim 40% (+ blur footage 10px)
         if clips[si][0] is None:
-            im = style.bg(t, var[si]).convert('RGBA'); im.alpha_composite(SHADE); return im.convert('RGB')
-        return footage_bg(clips[si][0], t, starts[si], clips[si][1], si * 7 + 3)
+            im = style.bg(t, var[si]).convert('RGBA'); im.alpha_composite(SHADE)
+        else:
+            im = footage_bg(clips[si][0], t, starts[si], clips[si][1], si * 7 + 3)
+            if k > .05: im = im.filter(ImageFilter.GaussianBlur(10 * k))
+            im = im.convert('RGBA')
+        if k > 0: im.alpha_composite(Image.new('RGBA', (W, H), (0, 0, 0, int(255 * .40 * k))))
+        return im.convert('RGB')
     def trans(img, t, dt, si):
         return style.transition(img, t, dt, var[si]) if clips[si][0] is None else transition(img, t, dt, si)
     video = Video(scenes, bgfn, dur, voice, transition=trans, shakes=list(shakes))

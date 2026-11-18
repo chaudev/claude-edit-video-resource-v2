@@ -49,19 +49,34 @@ def paste_alpha(img, layer, x, y, alpha=1.0):
         a = layer.getchannel('A').point(lambda v: int(v * alpha)); layer = layer.copy(); layer.putalpha(a)
     img.paste(layer, (int(round(x)), int(round(y))), layer)
 
+# ---------- outer glow (soft dark halo behind every text / label for readability) ----------
+GLOW = dict(on=os.environ.get('NOGLOW') is None, col=(0, 0, 0), a=.45, r=.11)
+def glow_under(img, L, px, py, alpha, size):
+    """paste a soft blurred halo of layer L's shape at (px, py) before L itself is pasted"""
+    if not GLOW['on'] or alpha <= .01: return
+    r = max(5, int(size * GLOW['r'])); pad = r * 2
+    w, h = L.size
+    A = Image.new('L', (w + 2 * pad, h + 2 * pad), 0); A.paste(L.getchannel('A'), (pad, pad))
+    sw, sh = max(1, A.size[0] // 2), max(1, A.size[1] // 2)
+    A = A.resize((sw, sh), Image.BILINEAR).filter(ImageFilter.GaussianBlur(r / 2)).resize(A.size, Image.BILINEAR)
+    k = GLOW['a'] * alpha
+    A = A.point(lambda v: int(min(255, v * 1.6) * k))
+    G = Image.new('RGBA', A.size, tuple(GLOW['col']) + (0,)); G.putalpha(A)
+    img.paste(G, (int(round(px - pad)), int(round(py - pad))), G)
+
 # ---------- layout guard registry ----------
 BOXES = []
 def reg(box, group, alpha=1):
     """register a solid element; elements in the same group may overlap each other"""
     if alpha > 0.5 and group is not False: BOXES.append((box, group))
 
-def tx(img, text, f, x, y, color, alpha=1.0, scale=1.0, dy=0, group=None, rot=0, shadow=None, anchor='m'):
+def tx(img, text, f, x, y, color, alpha=1.0, scale=1.0, dy=0, group=None, rot=0, shadow=None, anchor='m', glow=True):
     """centered text (anchor='l' => x is left edge). shadow=(r,g,b) draws offset drop shadow."""
     if alpha <= 0.01: return None
     if anchor == 'l': x = x + f.getlength(text) * scale / 2
     if shadow:
         o = max(3, int(f.size * .06 * scale))
-        tx(img, text, f, x + o, y + o, shadow, min(.45, alpha * .9), scale, dy, False, rot)
+        tx(img, text, f, x + o, y + o, shadow, min(.45, alpha * .9), scale, dy, False, rot, glow=False)
     bb = f.getbbox(text); pad = 30
     w, h = bb[2] - bb[0] + 2 * pad, bb[3] - bb[1] + 2 * pad
     L = Image.new('RGBA', (w, h), (0, 0, 0, 0))
@@ -69,6 +84,7 @@ def tx(img, text, f, x, y, color, alpha=1.0, scale=1.0, dy=0, group=None, rot=0,
     if scale != 1: L = L.resize((max(1, int(w * scale)), max(1, int(h * scale))), Image.LANCZOS)
     if rot: L = L.rotate(rot, resample=Image.BICUBIC, expand=True)
     lw, lh = L.size; px, py = x - lw / 2, y - lh / 2 + dy
+    if glow: glow_under(img, L, px, py, alpha, f.size * scale)
     paste_alpha(img, L, px, py, alpha)
     box = (px + pad * scale, py + pad * scale, px + lw - pad * scale, py + lh - pad * scale)
     reg(box, ('t', text) if group is None else group, alpha)
@@ -96,6 +112,7 @@ def chip(img, text, f, x, y, fg, bgc, alpha=1.0, scale=1.0, padx=34, pady=18, gr
     ImageDraw.Draw(L).text((padx - bb[0], pady - bb[1]), text, font=f, fill=tuple(fg) + (255,))
     if scale != 1: L = L.resize((max(1, int(w * scale)), max(1, int(h * scale))), Image.LANCZOS)
     if rot: L = L.rotate(rot, resample=Image.BICUBIC, expand=True)
+    glow_under(img, L, x - L.size[0] / 2, y - L.size[1] / 2, alpha, f.size * scale)
     paste_alpha(img, L, x - L.size[0] / 2, y - L.size[1] / 2, alpha)
     reg((x - w * scale / 2, y - h * scale / 2, x + w * scale / 2, y + h * scale / 2), ('c', text) if group is None else group, alpha)
 
@@ -112,7 +129,7 @@ def punch(img, text, f, x, y, col, t, at, glow=None, group=None):
     if p <= 0: return
     smax = min(2.2, (SAFE[2] - SAFE[0] - 40) / (f.getlength(text) + 1))
     s = 1 + (max(1, smax) - 1) * (1 - eo(p))
-    if glow and p < 1: tx(img, text, f, x + 6, y, glow, .45 * (1 - p), scale=s, group=False)
+    if glow and p < 1: tx(img, text, f, x + 6, y, glow, .45 * (1 - p), scale=s, group=False, glow=False)
     tx(img, text, f, x, y, col, eo(p * 2), scale=s, group=group)
 
 def counter(t, a, d, v0, v1, fmt='{:,}'):
